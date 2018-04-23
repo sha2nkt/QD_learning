@@ -17,9 +17,10 @@ class gameOb():
         self.direction = direction
         
 class gameEnv():
-    def __init__(self,partial,size):
+    def __init__(self,partial,size, object_size):
         self.sizeX = size
         self.sizeY = size
+        self.object_size = object_size
         self.actions = 5
         self.objects = []
         self.partial = partial
@@ -30,18 +31,24 @@ class gameEnv():
     def reset(self):
         self.objects = []
         self.holeDir = []
-        hero = gameOb((0, self.sizeY-1),1,1,2,None,'hero',None)
+        hero = gameOb((0, self.sizeY-1),self.object_size,1,2,None,'hero',None)
         self.objects.append(hero)
-        bug = gameOb((self.sizeX-1, 0),1,1,1,1,'goal',None)
+        bug = gameOb((self.sizeX-1, 0),self.object_size,1,1,1,'goal',None)
         self.objects.append(bug)
 
         # 0 - up, 1 - down, 2 - left, 3 - right
         dir1 = np.random.randint(0,4)
-        hole1 = gameOb(self.newPosition(),1,1,0,-1,'fire',dir1)
+        hole1 = gameOb(self.newPosition(),self.object_size,1,0,-1,'fire',dir1)
         self.objects.append(hole1)
         dir2 = np.random.randint(0,4)
-        hole2 = gameOb(self.newPosition(),1,1,0,-1,'fire',dir2)
+        hole2 = gameOb(self.newPosition(),self.object_size,1,0,-1,'fire',dir2)
         self.objects.append(hole2)
+        dir3 = np.random.randint(0,4)
+        hole3 = gameOb(self.newPosition(),self.object_size,1,0,-1,'fire',dir3)
+        self.objects.append(hole3)
+        dir4 = np.random.randint(0,4)
+        hole4 = gameOb(self.newPosition(),self.object_size,1,0,-1,'fire',dir4)
+        self.objects.append(hole4)
         state = self.renderEnv()
         self.state = state
         return state
@@ -78,36 +85,47 @@ class gameEnv():
                     else:
                         self.objects.remove(obj)
                         dir1 = np.random.randint(0,4)                        
-                        self.objects.append(gameOb(self.sidePosition(),1,1,0,-1,'fire',dir1))
+                        self.objects.append(gameOb(self.sidePosition(),self.object_size,1,0,-1,'fire',dir1))
                 if direction == 1:
                     if(obj.y <= self.sizeY-2):
                         obj.y += 1
                     else:
                         self.objects.remove(obj)
                         dir1 = np.random.randint(0,4)                        
-                        self.objects.append(gameOb(self.sidePosition(),1,1,0,-1,'fire',dir1))
+                        self.objects.append(gameOb(self.sidePosition(),self.object_size,1,0,-1,'fire',dir1))
                 if direction == 2:
                     if(obj.x >= 1):
                         obj.x -= 1
                     else:
                         self.objects.remove(obj)
                         dir1 = np.random.randint(0,4)                        
-                        self.objects.append(gameOb(self.sidePosition(),1,1,0,-1,'fire',dir1))                    
+                        self.objects.append(gameOb(self.sidePosition(),self.object_size,1,0,-1,'fire',dir1))                    
                 if direction == 3:
                     if(obj.x <= self.sizeX-2):
                         obj.x += 1
                     else:
                         self.objects.remove(obj)
                         dir1 = np.random.randint(0,4)                        
-                        self.objects.append(gameOb(self.sidePosition(),1,1,0,-1,'fire',dir1))
+                        self.objects.append(gameOb(self.sidePosition(),self.object_size,1,0,-1,'fire',dir1))
                        
 
     def sidePosition(self):
         # when one object disappears, another object appears on the side
         iterables = [[0,self.sizeX], [0,self.sizeY]]
         points = []
-        for t in itertools.product(*iterables):
-            points.append(t)
+        x_idxs = self.sizeX
+        y_idxs = self.sizeY
+        for y_idx in range(y_idxs):
+            points.append([0,y_idx])
+        for y_idx in range(y_idxs):
+            points.append([x_idxs, y_idx])
+        for x_idx in range(x_idxs):
+            points.append([x_idx, 0])
+        for x_idx in range(x_idxs):
+            points.append([x_idx, y_idxs])
+
+        # for t in itertools.product(*iterables):
+        #     points.append(t)
         currentPositions = []
         for objectA in self.objects:
             if (objectA.x,objectA.y) not in currentPositions:
@@ -154,27 +172,28 @@ class gameEnv():
                     #do nothing for now
                     pass
                 else:
-                    dir1 = np.random.randint(0,4)
-                    print(dir1)
-                    self.objects.append(gameOb(self.newPosition(),1,1,0,-1,'fire',dir1))
+                    # dir1 = np.random.randint(0,4)
+                    # print(dir1)
+                    # self.objects.append(gameOb(self.newPosition(),1,1,0,-1,'fire',dir1))
+                    pass
                 return other.reward,False
         if ended == False:
             return 0.0,False
 
     def renderEnv(self):
-        #a = np.zeros([self.sizeY,self.sizeX,3])
-        a = np.ones([self.sizeY+2,self.sizeX+2,3])
-        a[1:-1,1:-1,:] = 0
+        a = np.zeros([self.sizeY,self.sizeX,3])
+        # a = np.ones([self.sizeY,self.sizeX,3])
+        # a[1:-1,1:-1,:] = 0
         hero = None
         for item in self.objects:
-            a[item.y+1:item.y+item.size+1,item.x+1:item.x+item.size+1,item.channel] = item.intensity
+            a[item.y:item.y+item.size,item.x:item.x+item.size,item.channel] = item.intensity
             if item.name == 'hero':
                 hero = item
         if self.partial == True:
             a = a[hero.y:hero.y+3,hero.x:hero.x+3,:]
-        b = scipy.misc.imresize(a[:,:,0],[84,84,1],interp='nearest')
-        c = scipy.misc.imresize(a[:,:,1],[84,84,1],interp='nearest')
-        d = scipy.misc.imresize(a[:,:,2],[84,84,1],interp='nearest')
+        b = a[:,:,0]
+        c = a[:,:,1]
+        d = a[:,:,2]
         a = np.stack([b,c,d],axis=2)
         return a
 
@@ -184,9 +203,9 @@ class gameEnv():
         reward,done = self.checkGoal()
         state = self.renderEnv()
         if reward == None:
-            print(done)
-            print(reward)
-            print(penalty)
+        #     print(done)
+        #     print(reward)
+        #     print(penalty)
             return state,(reward+penalty),done
         else:
             return state,(reward+penalty),done
