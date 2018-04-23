@@ -12,7 +12,7 @@ import random
 from PIL import Image
 
 import numpy as np, gym, sys, copy, argparse
-
+import logger 
 from gridworld import gameEnv 
 
 
@@ -209,6 +209,7 @@ def evaluate(env_name, online_net):
         avg_reward += total_reward
 
     avg_reward /= 20.
+    tb.scalar_summary('test/avgreward', avg_reward, s_iter)
 
     return avg_reward
 
@@ -222,6 +223,7 @@ gamma = 1.0
 C = args.C
 tau = 1e-2
 env = gameEnv(partial=False, size=32, object_size=1)
+
 # env = gym.make(environment_name)
 # env = gym.wrappers.Monitor(env, 'space_invaders_dqn_color_curr', video_callable=lambda episode_id: episode_id%(num_episodes//100)==0, force=True)
 
@@ -236,6 +238,10 @@ target_net.cuda()
 
 optimizer = optim.Adam(online_net.parameters(), lr=1e-4)
 
+tb_folder = './predNet_0/'
+tb = logger.Logger(tb_folder, name='freeloc')
+shutil.rmtree(tb_folder, ignore_errors=True)
+# global_step = 0 
 
 s_iter = 0
 epsilon = EPSILON
