@@ -1,5 +1,5 @@
 from collections import deque
-
+import pdb
 import torch
 import cv2
 import torch.nn as nn
@@ -14,6 +14,7 @@ from PIL import Image
 import numpy as np, gym, sys, copy, argparse
 import logger 
 from gridworld import gameEnv 
+import shutil
 
 
 torch.set_default_tensor_type('torch.FloatTensor')
@@ -42,13 +43,13 @@ class QNetworkConv(nn.Module):
         self.conv1= nn.Conv2d(12, 32, kernel_size=3, stride=1)
         self.bn1 = nn.BatchNorm2d(32)
 
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=2)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1)
         self.bn2 = nn.BatchNorm2d(64)
 
-        self.conv3 = nn.Conv2d(64, 64, kernel_size=3, stride=2)
+        self.conv3 = nn.Conv2d(64, 64, kernel_size=3, stride=1)
         self.bn3 = nn.BatchNorm2d(64)
 
-        self.linear = nn.Linear(64*6*6,self.hidden_dim)
+        self.linear = nn.Linear(64*10*10,self.hidden_dim)
 
 
 
@@ -61,7 +62,7 @@ class QNetworkConv(nn.Module):
 
         x = F.relu(self.bn3(self.conv3(x)))
 
-        x = F.relu(self.linear(x.view(-1, 64*6*6)))
+        x = F.relu(self.linear(x.view(-1, 64*10*10)))
 
         q_vals = self.q_vals(x)
 
@@ -135,7 +136,7 @@ def get_action(q_values, epsilon, env):
     if dummy > epsilon:
         return np.argmax(q_values.cpu().data.numpy(),1)[0]
     else:
-        return env.action_space.sample()
+        return np.random.randint(0,5)
 
 
 def update_parameters(online_net, target_net, batch):
@@ -169,15 +170,15 @@ def update_parameters(online_net, target_net, batch):
     return loss
 
 
-def evaluate(env_name, online_net):
+def evaluate(env, online_net):
     # env = gym.make(env_name)
-    env = gameEnv(partial=False, size=32, object_size=1)
     avg_reward = 0.
     for ep in range(20):
+
         state = env.reset()
         # screen = env.render(mode='rgb_array')
 
-        frame_state = np.zeros((4 * 3, 32, 32), dtype=np.float32)
+        frame_state = np.zeros((4 * 3, 16, 16), dtype=np.float32)
         frame_state[9:, :, :] = np.transpose(state, (2, 0, 1))
 
         total_reward = 0
@@ -200,15 +201,17 @@ def evaluate(env_name, online_net):
             # next_frame_state[9:, :, :] = np.transpose(process_frame(screen), (2, 0, 1))
             next_frame_state[9:, :, :] = np.transpose(next_state, (2, 0, 1))
             frame_state = next_frame_state
+            step += 1
 
             if done:
                 break
 
-        print('Evaluation done of episode:',ep+1)
+        # print('Evaluation done of episode:',ep+1)
 
         avg_reward += total_reward
 
     avg_reward /= 20.
+    print("TB logged!!!")
     tb.scalar_summary('test/avgreward', avg_reward, s_iter)
 
     return avg_reward
@@ -216,13 +219,13 @@ def evaluate(env_name, online_net):
 
 args = parse_arguments()
 num_episodes = 100000
-maxSteps = 300
+maxSteps = 200
 # num_s_iterations = 1000000
 # environment_name = args.env
 gamma = 1.0
 C = args.C
 tau = 1e-2
-env = gameEnv(partial=False, size=32, object_size=1)
+env = gameEnv(partial=False, size=16, object_size=1)
 
 # env = gym.make(environment_name)
 # env = gym.wrappers.Monitor(env, 'space_invaders_dqn_color_curr', video_callable=lambda episode_id: episode_id%(num_episodes//100)==0, force=True)
@@ -237,11 +240,11 @@ online_net.cuda()
 target_net.cuda()
 
 optimizer = optim.Adam(online_net.parameters(), lr=1e-4)
-
 tb_folder = './predNet_0/'
-tb = logger.Logger(tb_folder, name='freeloc')
 shutil.rmtree(tb_folder, ignore_errors=True)
-# global_step = 0 
+tb = logger.Logger(tb_folder, name='freeloc')
+# global_step = 0
+eval_freq = 5000
 
 s_iter = 0
 epsilon = EPSILON
@@ -250,7 +253,7 @@ for ie in range(num_episodes):
     state = env.reset()
     # screen = env.render(mode='rgb_array')
 
-    frame_state = np.zeros((4*3, 32, 32), dtype=np.float32)
+    frame_state = np.zeros((4*3, 16, 16), dtype=np.float32)
     frame_state[9:, :, :] = np.transpose(state, (2, 0, 1))
 
     total_score = 0.
@@ -277,9 +280,9 @@ for ie in range(num_episodes):
 
         memory.append([np.uint8(frame_state), reward, done, action, np.uint8(next_frame_state)])
 
-        if s_iter % 5000 == 0:
+        if s_iter % eval_freq == 0:
             print('Evaluating after %d iterations' % s_iter)
-            eval_stats.append(evaluate(environment_name, online_net))
+            eval_stats.append(evaluate(env, online_net))
 
 
         s_iter += 1
