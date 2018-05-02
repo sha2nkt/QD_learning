@@ -10,7 +10,7 @@ import random
 from collections import deque
 import shutil
 import gym
-from scipy.misc import imsave
+from scipy.misc import imsave, imresize
 import os
 
 class Memory(object):
@@ -252,10 +252,14 @@ class Agent():
                         batch_ns_un = self.unnormalize_data(batch_ns)
                         preds_0 = preds_un[0].data.cpu().numpy().transpose((1,2,0))
                         batch_ns_0 = batch_ns_un[0].data.cpu().numpy().transpose((1,2,0))
+                        batch_ns_0 = imresize(batch_ns_0, (84,84))
+                        preds_0 = imresize(preds_0, (84,84))
                         imsave(self.img_folder+'/'+str(img_num)+'_gt_0'+'.png', batch_ns_0)
                         imsave(self.img_folder+'/'+str(img_num)+'_pred_0'+'.png', preds_0)
                         preds_10 = preds_un[10].data.cpu().numpy().transpose((1, 2, 0))
                         batch_ns_10 = batch_ns_un[10].data.cpu().numpy().transpose((1, 2, 0))
+                        batch_ns_10 = imresize(batch_ns_10, (84, 84))
+                        preds_10 = imresize(preds_10, (84, 84))
                         imsave(self.img_folder+'/'+str(img_num)+'_gt_10'+'.png', batch_ns_10)
                         imsave(self.img_folder+'/'+str(img_num)+'_pred_10'+'.png', preds_10)
 
