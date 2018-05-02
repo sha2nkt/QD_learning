@@ -15,7 +15,7 @@ import os
 
 class Memory(object):
 
-    def __init__(self, memory_size=50, burn_in=10):
+    def __init__(self, memory_size=16, burn_in=10):
 
         self.memory = deque(maxlen=memory_size)
 
@@ -52,9 +52,9 @@ class Agent():
         self.num_traces = 8
         self.trace_length = 5
         self.lr = 2e-4
-        run_num = 10
+        run_num = 11
         self.num_train_iters = 64
-        self.img_iter = 10
+        self.img_iter = 5
         self.lam = 0.6 # trade-off between generator loss and l2 loss
 
 
@@ -75,8 +75,8 @@ class Agent():
         self.discriminator = Discriminator()
         self.discriminator.cuda()
         # self.criterion = nn.MultiLabelSoftMarginLoss().cuda()
-        self.criterion = nn.MSELoss().cuda()
-        # self.criterion = nn.MultiLabelSoftMarginLoss().cuda()
+        # self.criterion = nn.MSELoss().cuda()
+        self.criterion = nn.MultiLabelSoftMarginLoss().cuda()
         self.d_criterion = nn.BCELoss().cuda()
         self.g_criterion = nn.BCELoss().cuda()
         # self.g_criterion = nn.MultiLabelSoftMarginLoss().cuda()
@@ -277,7 +277,7 @@ class Agent():
             if n%50==0:
                 self.save_model_weights()
                 print('Episode Num', n,' Model Saved!')
-        print('BCE on generator')
+        print('MultiLabel Loss on generator')
         print('num_episodes:', self.num_episodes)
         print('batch_size:', self.batch_size)
         print('trace_length:', self.trace_length)
