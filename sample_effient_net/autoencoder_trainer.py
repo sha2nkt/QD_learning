@@ -53,6 +53,7 @@ class Agent():
         self.trace_length = 5
         self.lr = 2e-4
         run_num = 2
+        self.num_train_iters = 64
         self.lam = 0.6 # trade-off between generator loss and l2 loss
 
         print('num_episodes:', self.num_episodes)
@@ -61,11 +62,12 @@ class Agent():
         print('trace_length:', self.trace_length)
         print('lr:', self.lr)
         print('run_num:', run_num)
+        print('num_train_iters:', self.num_train_iters)
         print('lam', self.lam)  # trade-off between generator loss and l2 loss
 
 
         # Number of time we want to train autoencoder for every episode in the environment
-        self.num_train_iters = 64
+
         self.model = PredictorNet()
         self.model.cuda()
         self.discriminator = Discriminator()
@@ -99,7 +101,7 @@ class Agent():
 
 
     def sample_training_data(self):
-        train_data = self.memory.sample_batch(self.batch_size, self.trace_length)
+        train_data = self.memory.sample_batch(self.batch_size, self.num_traces, self.trace_length)
         batch_s = []
         batch_a = []
         batch_r = []
