@@ -11,45 +11,58 @@ class PredictorNet(nn.Module):
         self.forward_conv = nn.Sequential(
             # Input: 256x256
             nn.Conv2d(12, 64,kernel_size=8, stride=2, padding=1),
+            nn.BatchNorm2d(64),
             nn.ReLU(True),
             nn.Conv2d(64, 128,kernel_size=6,stride=2, padding=1),
+            nn.BatchNorm2d(128),
             nn.ReLU(True),
             nn.Conv2d(128, 128, kernel_size=6, stride=2, padding=1),
+            nn.BatchNorm2d(128),
             nn.ReLU(True),
             nn.Conv2d(128, 128, kernel_size=6, stride=2, padding=1),
+            nn.BatchNorm2d(128),
             nn.ReLU(True),
         )
         self.encoder = nn.Sequential(
             nn.Linear(128 * 11 * 8, 1024),
+            nn.BatchNorm1d(1024),
             nn.ReLU(True),
             nn.Linear(1024, 2048)
         )
         self.forward_actions = nn.Sequential(
             nn.Linear(6, 1024),
+            nn.BatchNorm1d(1024),
             nn.ReLU(True),
             nn.Linear(1024, 2048)
         )
 
         self.reward = nn.Sequential(
             nn.Linear(2048, 512),
+            nn.BatchNorm1d(512),
             nn.ReLU(True),
             nn.Linear(512,128),
+            nn.BatchNorm1d(128),
             nn.ReLU(True),
             nn.Linear(128,3),
         )
         self.decoder = nn.Sequential(
             nn.Linear(2048, 1024),
+            nn.BatchNorm1d(1024),
             nn.ReLU(True),
             nn.Linear(1024, 128 * 11 * 8) #12 for 256
         )
         self.forward_deconv = nn.Sequential(
             nn.ConvTranspose2d(128, 128, kernel_size=6, stride=2, padding=1),
+            nn.BatchNorm2d(128),
             nn.ReLU(True),
             nn.ConvTranspose2d(128, 128, kernel_size=6, stride=2, padding=1),
+            nn.BatchNorm2d(128),
             nn.ReLU(True),
             nn.ConvTranspose2d(128, 64, kernel_size=6, stride=2, padding=1),
+            nn.BatchNorm2d(64),
             nn.ReLU(True),
             nn.ConvTranspose2d(64, 3, kernel_size=8, stride=2, padding=(0,1)),
+            nn.Sigmoid(),
         )
 
     def forward(self, x, a):
@@ -67,3 +80,36 @@ class PredictorNet(nn.Module):
 
 
 
+
+class Discriminator(nn.Module):
+    def __init__(self, num_classes=20):
+        super(Discriminator, self).__init__()
+        # TODO: Define model
+        self.forward_conv = nn.Sequential(
+            # Input: 256x256
+            nn.Conv2d(3, 64,kernel_size=8, stride=2, padding=1),
+            nn.LeakyReLU(0.2, True),
+            nn.Conv2d(64, 128,kernel_size=6,stride=2, padding=1),
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(0.2, True),
+            nn.Conv2d(128, 128, kernel_size=6, stride=2, padding=1),
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(0.2, True),
+            nn.Conv2d(128, 128, kernel_size=6, stride=2, padding=1),
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(0.2, True),
+        )
+        self.discriminator = nn.Sequential(
+            nn.Linear(128 * 11 * 8, 1024),
+            nn.BatchNorm1d(1024),
+            nn.LeakyReLU(True),
+            nn.Linear(1024, 1),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, x):
+        # TODO: Define forward pass
+        x = self.forward_conv(x)
+        x = x.view(-1, 128 * 11 * 8)
+        x = self.discriminator(x)
+        return x

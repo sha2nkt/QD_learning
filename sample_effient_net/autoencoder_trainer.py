@@ -15,17 +15,18 @@ import os
 
 class Memory(object):
 
-    def __init__(self, memory_size=300, burn_in=10):
+    def __init__(self, memory_size=50, burn_in=10):
 
         self.memory = deque(maxlen=memory_size)
 
-    def sample_batch(self, batch_size, trace_length):
+    def sample_batch(self, batch_size, num_traces, trace_length):
 
-        sampled_episodes = random.sample(self.memory, batch_size)
+        sampled_episodes = random.sample(self.memory, batch_size//num_traces)
         sampledTraces = []
         for episode in sampled_episodes:
-            point = np.random.randint(0, len(episode)-trace_length)
-            sampledTraces.append(episode[point:point+trace_length]) # this is a list of traces
+            for i in range(num_traces):
+                point = np.random.randint(0, len(episode)-trace_length)
+                sampledTraces.append(episode[point:point+trace_length]) # this is a list of traces
         ## 5 for curr_state, action, reward, isTerminal
         ## Why 5th one? - next state
         ## seems next state, but do I need next state?
@@ -46,20 +47,37 @@ class Agent():
         # self.env = gameEnv(partial=False, size=self.env_size)
         self.env = gym.make('Pong-v0')
         # self.max_epLength = 100
-        self.num_episodes = 10000
+        self.num_episodes = 1000
         self.batch_size = 32
+        self.num_traces = 8
         self.trace_length = 5
-        self.lr = 1e-4
+        self.lr = 2e-4
+        run_num = 2
+        self.lam = 0.6 # trade-off between generator loss and l2 loss
+
+        print('num_episodes:', self.num_episodes)
+        print('batch_size:', self.batch_size)
+        print('self.num_traces', self.num_traces)
+        print('trace_length:', self.trace_length)
+        print('lr:', self.lr)
+        print('run_num:', run_num)
+        print('lam', self.lam)  # trade-off between generator loss and l2 loss
+
+
         # Number of time we want to train autoencoder for every episode in the environment
-        self.num_train_iters = 10
+        self.num_train_iters = 64
         self.model = PredictorNet()
         self.model.cuda()
+        self.discriminator = Discriminator()
+        self.discriminator.cuda()
         # self.criterion = nn.MultiLabelSoftMarginLoss().cuda()
         self.criterion = nn.MSELoss().cuda()
-        cls_weight = torch.Tensor([1, 1,1])
+        self.d_criterion = nn.BCELoss().cuda()
+        self.g_criterion = nn.BCELoss().cuda()
+        cls_weight = torch.Tensor([1, 1, 1])
         self.r_criterion = nn.CrossEntropyLoss().cuda()
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
-        run_num = 0
+        self.g_optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr, betas = (0.5, 0.999))
+        self.d_optimizer = torch.optim.Adam(self.discriminator.parameters(), lr=self.lr, betas = (0.5, 0.999))
         self.tb_folder = './pong_autoenc_'+str(run_num)+'/'
         shutil.rmtree(self.tb_folder+'/freeloc', ignore_errors=True)
         self.tb = logger.Logger(self.tb_folder, name='freeloc')
@@ -71,9 +89,16 @@ class Agent():
         if not os.path.exists(self.img_folder):
             os.makedirs(self.img_folder)
 
+    def normalize_data(self, state):
+        state = ((state - torch.min(state)) * 1.0)/255
+        return state
+
+    def unnormalize_data(self, state):
+        state = (255.*state)+torch.min(state)
+        return state
 
 
-    def generate_training_data(self):
+    def sample_training_data(self):
         train_data = self.memory.sample_batch(self.batch_size, self.trace_length)
         batch_s = []
         batch_a = []
@@ -118,19 +143,30 @@ class Agent():
         batch_ns = torch.autograd.Variable(batch_ns)
         return batch_s, batch_a, batch_r, batch_ns
 
+    def reset_grad(self, params):
+        for p in params:
+            if p.grad is not None:
+                p.grad.data.zero_()
+
     def train(self):
         self.model.train()
-        # # Xavier initialization
-        # def weights_init(m):
-        #     classname = m.__class__.__name__
-        #     if classname.find('Conv') != -1:
-        #         nn.init.xavier_normal(m.weight.data)
-        #         m.bias.data.fill_(0)
-        #
+        # Normal initialization
+        def weights_init(m):
+            classname = m.__class__.__name__
+            if classname.find('Conv') != -1:
+                # m.weight.data.normal_(0.0, 0.02)
+                nn.init.xavier_normal(m.weight.data)
+                m.bias.data.fill_(0)
+            elif classname.find('BatchNorm') != -1:
+                m.weight.data.normal_(1.0, 0.02)
+                m.bias.data.fill_(0)
+        self.model.apply(weights_init)
+        self.discriminator.apply(weights_init)
         # self.model.forward_conv.apply(weights_init)
         # self.model.forward_deconv.apply(weights_init)
-
-        sigmoid = nn.Sigmoid()
+        self.discriminator.train()
+        params = list(self.model.parameters())+list(self.discriminator.parameters())
+        # sigmoid = nn.Sigmoid()
         img_num = 0
         for n in range(0, self.num_episodes):
             ep_state_list = []
@@ -138,6 +174,7 @@ class Agent():
             ep_reward_list = []
             ep_nextState_list = []
             s = self.env.reset()
+            # s = self.normalize_data(s)
             s = s.transpose((2,0,1))
             done = False
             while not done:
@@ -147,6 +184,7 @@ class Agent():
                 a_oh[0, a] = 1
                 ep_action_list.append(a_oh)
                 ns, r, done, _ = self.env.step(a)
+                # ns = self.normalize_data(ns)
                 # r_oh = np.zeros((1,3))
                 if r==-1:
                     r_lab=0
@@ -165,26 +203,54 @@ class Agent():
             episode_buffer = zip(ep_state_arr, ep_action_arr, ep_reward_arr, ep_nextState_arr)
             self.memory.append(episode_buffer)
 
-            if n>=self.batch_size:
+            if n>=self.batch_size//self.num_traces:
                 # This is a list of batch_size lists each having trace_len tuples
                 for train_iters in range(self.num_train_iters):
-                    batch_s, batch_a, batch_r, batch_ns = self.generate_training_data()
-                    self.optimizer.zero_grad()
+                    batch_s, batch_a, batch_r, batch_ns = self.sample_training_data()
+                    batch_s = self.normalize_data(batch_s)
+                    batch_ns = self.normalize_data(batch_ns)
+                    self.d_optimizer.zero_grad()
                     preds, r = self.model.forward(batch_s, batch_a)
-                    loss = self.criterion(preds, batch_ns)
+                    # Train the discriminator
+                    D_real = self.discriminator.forward(batch_ns)
+                    D_fake = self.discriminator.forward(preds.detach())
+                    ones_label = torch.autograd.Variable(torch.ones(self.batch_size).cuda())
+                    zeros_label = torch.autograd.Variable(torch.zeros(self.batch_size).cuda())
+                    # if(n==35):
+                    #     pdb.set_trace()
+                    D_loss_real = self.d_criterion(D_real.view(-1,), ones_label)
+                    D_loss_fake = self.d_criterion(D_fake.view(-1,), zeros_label)
+                    D_loss = D_loss_real + D_loss_fake
+                    D_loss.backward()
+                    self.d_optimizer.step()
+
+                    # #Clear gradients
+                    # self.reset_grad(params)
+
+                    # Train the generator
+                    self.g_optimizer.zero_grad()
+                    ## *** Do we need to get D_fake from better D here?
+                    D_fake = self.discriminator.forward(preds)
+                    G_loss = self.g_criterion(D_fake.view(-1,), ones_label)
+                    l2_loss = self.criterion(preds, batch_ns)
+                    loss = G_loss + self.lam*l2_loss
                     r_loss = self.r_criterion(r, batch_r.view(-1,))
                     net_loss = loss + r_loss
                     net_loss.backward()
-
-                    self.optimizer.step()
+                    self.g_optimizer.step()
+                    #Clear gradients
+                    self.reset_grad(params)
                     if n%self.img_iter==0:
+                        print(img_num)
                         img_num += 1
-                        preds_0 = preds[0].data.cpu().numpy().transpose((1,2,0))
-                        batch_ns_0 = batch_ns[0].data.cpu().numpy().transpose((1,2,0))
+                        preds_un = self.unnormalize_data(preds)
+                        batch_ns_un = self.unnormalize_data(batch_ns)
+                        preds_0 = preds_un[0].data.cpu().numpy().transpose((1,2,0))
+                        batch_ns_0 = batch_ns_un[0].data.cpu().numpy().transpose((1,2,0))
                         imsave(self.img_folder+'/'+str(img_num)+'_gt_0'+'.png', batch_ns_0)
                         imsave(self.img_folder+'/'+str(img_num)+'_pred_0'+'.png', preds_0)
-                        preds_10 = preds[10].data.cpu().numpy().transpose((1, 2, 0))
-                        batch_ns_10 = batch_ns[10].data.cpu().numpy().transpose((1, 2, 0))
+                        preds_10 = preds_un[10].data.cpu().numpy().transpose((1, 2, 0))
+                        batch_ns_10 = batch_ns_un[10].data.cpu().numpy().transpose((1, 2, 0))
                         imsave(self.img_folder+'/'+str(img_num)+'_gt_10'+'.png', batch_ns_10)
                         imsave(self.img_folder+'/'+str(img_num)+'_pred_10'+'.png', preds_10)
 
@@ -194,13 +260,26 @@ class Agent():
                     # batch_ns = batch_ns.data.cpu().numpy()
                     # accuracy = np.sum(preds == batch_ns)*1.0 / (self.batch_size * 3 * self.env_size * self.env_size)
                     # self.tb.scalar_summary('train/acc', accuracy, self.global_step)
+                    self.tb.scalar_summary('train/discriminator_loss_real', D_loss_real, self.global_step)
+                    self.tb.scalar_summary('train/discriminator_loss_fake', D_loss_fake, self.global_step)
+                    self.tb.scalar_summary('train/disciminator_loss_net', D_loss, self.global_step)
+                    self.tb.scalar_summary('train/generator_loss', G_loss, self.global_step)
                     self.tb.scalar_summary('train/state_loss', loss, self.global_step)
                     self.tb.scalar_summary('train/reward_loss', r_loss, self.global_step)
 
                     self.global_step += 1
 
-        if n%10==0:
-            self.save_model_weights()
+            if n%500==0:
+                self.save_model_weights()
+                print('Episode Num', n,' Model Saved!')
+
+        print('num_episodes:', self.num_episodes)
+        print('batch_size:', self.batch_size)
+        print('trace_length:', self.trace_length)
+        print('lr:', self.lr)
+        print('run_num:', run_num)
+        print('lam', self.lam)
+
 
 
 
@@ -317,6 +396,8 @@ def main():
     agent = Agent()
     # agent.train()
     agent.train()
+
+
 
 
 if __name__ == '__main__':

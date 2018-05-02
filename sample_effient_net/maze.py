@@ -68,16 +68,24 @@ class gameEnv():
                 direction = obj.direction 
                 if direction == 0:
                     if (obj.y >= 1):
-                        obj.y -= 1 
+                        obj.y -= 1
+                    else:
+                        obj.direction = 1
                 if direction == 1:
                     if (obj.y <= self.sizeY-2):
-                        obj.y += 1 
+                        obj.y += 1
+                    else:
+                        obj.direction = 0
                 if direction == 2:
                     if (obj.x >= 1):
-                        obj.x -= 1 
+                        obj.x -= 1
+                    else:
+                        obj.direction = 3
                 if direction == 3:
                     if (obj.x <= self.sizeX-2):
                         obj.x += 1
+                    else:
+                        obj.direction = 2
     
     def newPosition(self):
         iterables = [range(self.sizeX), range(self.sizeY)]
