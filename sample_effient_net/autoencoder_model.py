@@ -27,13 +27,18 @@ class PredictorNet(nn.Module):
             nn.Linear(128 * 11 * 8, 1024),
             nn.BatchNorm1d(1024),
             nn.ReLU(True),
-            nn.Linear(1024, 2048)
+            nn.Linear(1024, 2048),
+            nn.BatchNorm1d(2048),
+            nn.ReLU(True),
+
         )
         self.forward_actions = nn.Sequential(
             nn.Linear(6, 1024),
             nn.BatchNorm1d(1024),
             nn.ReLU(True),
-            nn.Linear(1024, 2048)
+            nn.Linear(1024, 2048),
+            nn.BatchNorm1d(2048),
+            nn.ReLU(True),
         )
 
         self.reward = nn.Sequential(
@@ -49,7 +54,9 @@ class PredictorNet(nn.Module):
             nn.Linear(2048, 1024),
             nn.BatchNorm1d(1024),
             nn.ReLU(True),
-            nn.Linear(1024, 128 * 11 * 8) #12 for 256
+            nn.Linear(1024, 128 * 11 * 8), #12 for 256
+            nn.BatchNorm1d(128*11*8),
+            nn.ReLU(True),
         )
         self.forward_deconv = nn.Sequential(
             nn.ConvTranspose2d(128, 128, kernel_size=6, stride=2, padding=1),
