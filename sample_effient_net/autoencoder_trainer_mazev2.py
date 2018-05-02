@@ -15,7 +15,7 @@ import os
 
 class Memory(object):
 
-    def __init__(self, memory_size=16, burn_in=10):
+    def __init__(self, memory_size=100, burn_in=10):
 
         self.memory = deque(maxlen=memory_size)
 
@@ -182,7 +182,7 @@ class Agent():
             # s = self.normalize_data(s)
             s = s.transpose((2,0,1))
             done = False
-            while not done:
+            for j in range(0, self.max_epLength):
                 ep_state_list.append(s)
                 a = np.random.randint(0, 6)
                 a_oh = np.zeros((1,6))
