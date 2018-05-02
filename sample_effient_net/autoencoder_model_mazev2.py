@@ -56,13 +56,13 @@ class PredictorNet(nn.Module):
             nn.ReLU(True),
         )
         self.forward_deconv = nn.Sequential(
-            nn.ConvTranspose2d(128, 128, kernel_size=3, stride=1),
+            nn.ConvTranspose2d(128, 128, kernel_size=4, stride=1),
             nn.BatchNorm2d(128),
             nn.ReLU(True),
-            nn.ConvTranspose2d(128, 128, kernel_size=3, stride=1),
+            nn.ConvTranspose2d(128, 128, kernel_size=4, stride=1),
             nn.BatchNorm2d(128),
             nn.ReLU(True),
-            nn.ConvTranspose2d(128, 3, kernel_size=4, stride=1),
+            nn.ConvTranspose2d(128, 3, kernel_size=5, stride=1),
             nn.Sigmoid(),
         )
 
@@ -109,6 +109,6 @@ class Discriminator(nn.Module):
     def forward(self, x):
         # TODO: Define forward pass
         x = self.forward_conv(x)
-        x = x.view(-1, 128 * 11 * 8)
+        x = x.view(-1, 128 * 6 * 6)
         x = self.discriminator(x)
         return x

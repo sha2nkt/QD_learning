@@ -1,6 +1,6 @@
 import pickle
 import torch
-from autoencoder_model import *
+from autoencoder_model_mazev2 import *
 from maze import gameEnv
 
 import torchvision.transforms as transforms
@@ -54,7 +54,7 @@ class Agent():
         self.lr = 2e-4
         run_num = 11
         self.num_train_iters = 64
-        self.img_iter = 5
+        self.img_iter = 500
         self.lam = 0.6 # trade-off between generator loss and l2 loss
 
 
@@ -274,7 +274,7 @@ class Agent():
 
                     self.global_step += 1
 
-            if n%50==0:
+            if n%200==0:
                 self.save_model_weights()
                 print('Episode Num', n,' Model Saved!')
         print('MultiLabel Loss on generator')
