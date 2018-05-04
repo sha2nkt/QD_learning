@@ -1,8 +1,7 @@
 import pickle
 import torch
-from autoencoder_model import *
-# from autoencoder_model_mazev2_branch import *
-from gridworld import gameEnv
+from autoencoder_model_mazev2_branch import *
+from maze import gameEnv
 
 import torchvision.transforms as transforms
 import logger
@@ -11,12 +10,12 @@ import random
 from collections import deque
 import shutil
 import gym
-from scipy.misc import imsave
+from scipy.misc import imsave, imresize
 import os
 
 class Memory(object):
 
-    def __init__(self, memory_size=50, burn_in=10):
+    def __init__(self, memory_size=500, burn_in=10):
 
         self.memory = deque(maxlen=memory_size)
 
@@ -44,18 +43,20 @@ class Memory(object):
 class Agent():
 
     def __init__(self):
-        # self.env_size = 64
-        # self.env = gameEnv(partial=False, size=self.env_size)
-        self.env = gym.make('Pong-v0')
-        # self.max_epLength = 100
+        self.env_size = 16
+        self.env = gameEnv(partial=False, size=self.env_size, object_size=1)
+        # self.env = gym.make('Pong-v0')
+        self.max_epLength = 100
         self.num_episodes = 100000
         self.batch_size = 32
         self.num_traces = 8
         self.trace_length = 5
-        self.lr = 2e-4
-        run_num = 600
+        self.lr = 1e-4
+        run_num = 500
         self.num_train_iters = 64
-        self.lam = 0 # trade-off between generator loss and l2 loss
+        self.img_iter = 100
+        self.lam = 1 # trade-off between generator loss and l2 loss
+
 
         print('num_episodes:', self.num_episodes)
         print('batch_size:', self.batch_size)
@@ -69,35 +70,36 @@ class Agent():
 
         # Number of time we want to train autoencoder for every episode in the environment
 
-        self.generator = PredictorNet()
-        self.generator.cuda()
+        self.model = PredictorNet()
+        self.model.cuda()
         self.discriminator = Discriminator()
         self.discriminator.cuda()
         # self.criterion = nn.MultiLabelSoftMarginLoss().cuda()
-        self.criterion = nn.MSELoss().cuda()
-        self.d_criterion = nn.BCEWithLogitsLoss().cuda()
-        self.g_criterion = nn.BCEWithLogitsLoss().cuda()
+        # self.criterion = nn.MSELoss().cuda()
+        self.criterion = nn.MultiLabelSoftMarginLoss().cuda()
+        # self.d_criterion = nn.BCELoss().cuda()
+        self.g_criterion = nn.BCELoss().cuda()
+        # self.g_criterion = nn.MultiLabelSoftMarginLoss().cuda()
         cls_weight = torch.Tensor([1, 1, 1])
         self.r_criterion = nn.CrossEntropyLoss().cuda()
-        self.g_optimizer = torch.optim.Adam(self.generator.parameters(), lr=self.lr, betas = (0.5, 0.999))
-        self.d_optimizer = torch.optim.Adam(self.discriminator.parameters(), lr=self.lr, betas = (0.5, 0.999))
-        self.tb_folder = './pong_autoenc_'+str(run_num)+'/'
+        self.g_optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+        self.d_optimizer = torch.optim.Adam(self.discriminator.parameters(), lr=self.lr)
+        self.tb_folder = './maze_autoenc_'+str(run_num)+'/'
         shutil.rmtree(self.tb_folder+'/freeloc', ignore_errors=True)
         self.tb = logger.Logger(self.tb_folder, name='freeloc')
-        self.generator_file = './pong_auto_model_'+str(run_num)
+        self.model_file = './maze_auto_model_'+str(run_num)
         self.global_step = 0
         self.memory = Memory()
-        self.img_iter = 50
         self.img_folder = 'images_'+str(run_num)
         if not os.path.exists(self.img_folder):
             os.makedirs(self.img_folder)
 
     def normalize_data(self, state):
-        state = ((state - torch.min(state)) * 1.0)/255
+        state = ((state) * 1.0)/255
         return state
 
     def unnormalize_data(self, state):
-        state = (255.*state)+torch.min(state)
+        state = (255.*state)
         return state
 
 
@@ -151,15 +153,9 @@ class Agent():
             if p.grad is not None:
                 p.grad.data.zero_()
 
-    def upsample(self, states):
-        torch.nn.UpsamplingNearest2d((210,160))
-
-    def downsample(self, states):
-        torch.nn.UpsamplingNearest2d((64,64))
-
     def train(self):
-        self.generator.train()
-        # # Normal initialization
+        self.model.train()
+        # Normal initialization
         # def weights_init(m):
         #     classname = m.__class__.__name__
         #     if classname.find('Conv') != -1:
@@ -169,12 +165,12 @@ class Agent():
         #     elif classname.find('BatchNorm') != -1:
         #         m.weight.data.normal_(1.0, 0.02)
         #         m.bias.data.fill_(0)
-        # self.generator.apply(weights_init)
+        # self.model.apply(weights_init)
         # self.discriminator.apply(weights_init)
-        # self.generator.forward_conv.apply(weights_init)
-        # self.generator.forward_deconv.apply(weights_init)
+        # self.model.forward_conv.apply(weights_init)
+        # self.model.forward_deconv.apply(weights_init)
         self.discriminator.train()
-        params = list(self.generator.parameters())+list(self.discriminator.parameters())
+        params = list(self.model.parameters())+list(self.discriminator.parameters())
         sigmoid = nn.Sigmoid()
         img_num = 0
         for n in range(0, self.num_episodes):
@@ -186,13 +182,13 @@ class Agent():
             # s = self.normalize_data(s)
             s = s.transpose((2,0,1))
             done = False
-            while not done:
+            for j in range(0, self.max_epLength):
                 ep_state_list.append(s)
                 a = np.random.randint(0, 6)
                 a_oh = np.zeros((1,6))
                 a_oh[0, a] = 1
                 ep_action_list.append(a_oh)
-                ns, r, done, _ = self.env.step(a)
+                ns, r, done = self.env.step(a)
                 # ns = self.normalize_data(ns)
                 # r_oh = np.zeros((1,3))
                 if r==-1:
@@ -216,47 +212,23 @@ class Agent():
                 # This is a list of batch_size lists each having trace_len tuples
                 for train_iters in range(self.num_train_iters):
                     batch_s, batch_a, batch_r, batch_ns = self.sample_training_data()
-                    batch_s = self.normalize_data(batch_s)
-                    batch_s = self.downsample(batch_s)
-                    batch_ns = self.normalize_data(batch_ns)
-                    batch_ns = self.downsample(batch_ns)
-                    self.d_optimizer.zero_grad()
-                    preds, r = self.generator.forward(batch_s, batch_a)
-                    ones_label = torch.autograd.Variable(torch.ones(self.batch_size).cuda())
-                    zeros_label = torch.autograd.Variable(torch.zeros(self.batch_size).cuda())
+
+                    # batch_s = self.normalize_data(batch_s)
+                    # batch_ns = self.normalize_data(batch_ns)
+                    # self.d_optimizer.zero_grad()
+                    preds, r = self.model.forward(batch_s, batch_a)
                     # Train the discriminator
-                    if np.random.rand()<0.5:
-                        D_real = self.discriminator.forward(batch_ns)
-                        D_loss_real = self.d_criterion(D_real.view(-1, ), ones_label)
-                        D_loss = D_loss_real
-                        pdb.set_trace()
-                        D_real = sigmoid(D_real)
-                        D_real = (D_real>=0.5).type(torch.FloatTensor)
-                        d_acc_real = torch.sum(D_real==1).type(torch.FloatTensor) *1.0/self.batch_size
-                        d_acc_fake=0
-                        self.tb.scalar_summary('train/discriminator_acc_real', d_acc_real, self.global_step)
-                        self.tb.scalar_summary('train/discriminator_loss_real', D_loss_real, self.global_step)
-
-
-
-                    else:
-                        D_fake = self.discriminator.forward(preds.detach())
-                        D_loss_fake = self.d_criterion(D_fake.view(-1, ), zeros_label)
-                        D_loss = D_loss_fake
-                        pdb.set_trace()
-                        D_fake = sigmoid(D_fake)
-                        D_fake = (D_fake >= 0.5).type(torch.FloatTensor)
-                        d_acc_fake = torch.sum(D_fake == 0).type(torch.FloatTensor) * 1.0 / self.batch_size
-                        d_acc_real = 0
-                        self.tb.scalar_summary('train/discriminator_acc_fake', d_acc_fake, self.global_step)
-                        self.tb.scalar_summary('train/discriminator_loss_fake', D_loss_fake, self.global_step)
-                    pdb.set_trace()
-                    d_acc = d_acc_real + d_acc_fake
-                    print(d_acc)
+                    # D_real = self.discriminator.forward(batch_ns)
+                    # D_fake = self.discriminator.forward(preds.detach())
+                    # ones_label = torch.autograd.Variable(torch.ones(self.batch_size).cuda())
+                    # zeros_label = torch.autograd.Variable(torch.zeros(self.batch_size).cuda())
                     # if(n==35):
                     #     pdb.set_trace()
-                    D_loss.backward()
-                    self.d_optimizer.step()
+                    # D_loss_real = self.d_criterion(D_real.view(-1,), ones_label)
+                    # D_loss_fake = self.d_criterion(D_fake.view(-1,), zeros_label)
+                    # D_loss = D_loss_real + D_loss_fake
+                    # D_loss.backward()
+                    # self.d_optimizer.step()
 
                     # #Clear gradients
                     # self.reset_grad(params)
@@ -264,35 +236,39 @@ class Agent():
                     # Train the generator
                     self.g_optimizer.zero_grad()
                     ## *** Do we need to get D_fake from better D here?
-                    D_fake = self.discriminator.forward(preds)
+                    # D_fake = self.discriminator.forward(preds)
+                    # G_loss = self.g_criterion(D_fake.view(-1,), ones_label)
+                    preds_vec = preds.view(self.batch_size, -1)
+                    batch_ns_vec = batch_ns.view(self.batch_size, -1)
 
-                    G_loss = self.g_criterion(D_fake.view(-1,), ones_label)
-                    l2_loss = self.criterion(preds, batch_ns)
-                    loss = G_loss + self.lam*l2_loss
-                    # r_loss = self.r_criterion(r, batch_r.view(-1,))
+                    l2_loss = self.criterion(preds_vec, batch_ns_vec)
+                    loss = l2_loss
                     r_loss = 0
+                    # r_loss = self.r_criterion(r, batch_r.view(-1,))
                     net_loss = loss + r_loss
                     net_loss.backward()
                     self.g_optimizer.step()
                     #Clear gradients
-                    self.reset_grad(params)
-
-                    D_fake = sigmoid(D_fake)
-                    D_fake = (D_fake >= 0.5).type(torch.FloatTensor)
-                    g_acc = torch.sum(D_fake == 1).type(torch.FloatTensor) * 1.0 / self.batch_size
+                    # self.reset_grad(params)
                     if n%self.img_iter==0:
                         print(img_num)
                         img_num += 1
-                        preds_un = self.unnormalize_data(preds)
-                        preds_un = self.upsample(preds_un)
-                        batch_ns_un = self.unnormalize_data(batch_ns)
-                        batch_ns_un = self.upsample(batch_ns_un)
+                        # preds_un = self.unnormalize_data(preds)
+                        # batch_ns_un = self.unnormalize_data(batch_ns)
+                        preds = sigmoid(preds)
+                        preds = (preds >= 0.25).type(torch.FloatTensor)
+                        preds_un = preds
+                        batch_ns_un = batch_ns
                         preds_0 = preds_un[0].data.cpu().numpy().transpose((1,2,0))
                         batch_ns_0 = batch_ns_un[0].data.cpu().numpy().transpose((1,2,0))
+                        batch_ns_0 = imresize(batch_ns_0, (84,84))
+                        preds_0 = imresize(preds_0, (84,84))
                         imsave(self.img_folder+'/'+str(img_num)+'_gt_0'+'.png', batch_ns_0)
                         imsave(self.img_folder+'/'+str(img_num)+'_pred_0'+'.png', preds_0)
                         preds_10 = preds_un[10].data.cpu().numpy().transpose((1, 2, 0))
                         batch_ns_10 = batch_ns_un[10].data.cpu().numpy().transpose((1, 2, 0))
+                        batch_ns_10 = imresize(batch_ns_10, (84, 84))
+                        preds_10 = imresize(preds_10, (84, 84))
                         imsave(self.img_folder+'/'+str(img_num)+'_gt_10'+'.png', batch_ns_10)
                         imsave(self.img_folder+'/'+str(img_num)+'_pred_10'+'.png', preds_10)
 
@@ -302,20 +278,19 @@ class Agent():
                     # batch_ns = batch_ns.data.cpu().numpy()
                     # accuracy = np.sum(preds == batch_ns)*1.0 / (self.batch_size * 3 * self.env_size * self.env_size)
                     # self.tb.scalar_summary('train/acc', accuracy, self.global_step)
-                    self.tb.scalar_summary('train/discriminator_acc', d_acc, self.global_step)
-                    self.tb.scalar_summary('train/generator_acc', g_acc, self.global_step)
-
-                    self.tb.scalar_summary('train/disciminator_loss_net', D_loss, self.global_step)
-                    self.tb.scalar_summary('train/generator_loss', G_loss, self.global_step)
+                    # self.tb.scalar_summary('train/discriminator_loss_real', D_loss_real, self.global_step)
+                    # self.tb.scalar_summary('train/discriminator_loss_fake', D_loss_fake, self.global_step)
+                    # self.tb.scalar_summary('train/disciminator_loss_net', D_loss, self.global_step)
+                    # self.tb.scalar_summary('train/generator_loss', G_loss, self.global_step)
                     self.tb.scalar_summary('train/state_loss', loss, self.global_step)
                     self.tb.scalar_summary('train/reward_loss', r_loss, self.global_step)
 
                     self.global_step += 1
 
-            if n%50==0:
+            if n%200==0:
                 self.save_model_weights()
                 print('Episode Num', n,' Model Saved!')
-
+        print('MultiLabel Loss on generator')
         print('num_episodes:', self.num_episodes)
         print('batch_size:', self.batch_size)
         print('trace_length:', self.trace_length)
@@ -327,19 +302,19 @@ class Agent():
 
 
     def save_model_weights(self):
-        torch.save(self.generator.state_dict(), self.generator_file)
+        torch.save(self.model.state_dict(), self.model_file)
 
 
 
     def load_model_weights(self):
-        checkpoint_dict = torch.load(self.generator_file)
-        self.generator.load_state_dict(checkpoint_dict)
+        checkpoint_dict = torch.load(self.model_file)
+        self.model.load_state_dict(checkpoint_dict)
 
 
 
     def test(self):
         self.load_model_weights()
-        self.generator.eval()
+        self.model.eval()
         sum_acc = 0
         count_acc = 0
         sigmoid = nn.Sigmoid()
@@ -418,7 +393,7 @@ class Agent():
                 batch_r = torch.autograd.Variable(batch_r)
                 batch_ns = torch.autograd.Variable(batch_ns)
 
-                preds, r = self.generator.forward(batch_s, batch_a)
+                preds, r = self.model.forward(batch_s, batch_a)
 
                 preds = sigmoid(preds)
                 preds = preds >= 0.2
